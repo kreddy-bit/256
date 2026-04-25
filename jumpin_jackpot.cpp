@@ -5,12 +5,12 @@
 #include <SSD1306Wire.h>
 #include <Adafruit_NeoPixel.h>
 
-// --- HARDWARE DEFINITIONS ---
+// Hardware connections
 #define LED_PIN 25
 #define IR_PIN A3
 #define BUZZER_PIN 17
 
-// CHANGE THESE TO YOUR ACTUAL BUTTON PINS
+// Button connections
 #define BTN_PLAY_SELECT 0  
 #define BTN_RIGHT 35       
 #define BTN_LEFT 32        
@@ -18,22 +18,23 @@
 Adafruit_NeoPixel ring = Adafruit_NeoPixel(16, LED_PIN, NEO_GRB + NEO_KHZ800);
 SSD1306Wire lcd(0x3C, SDA, SCL);
 
-// --- GAME STATES ---
+// The different screens the game can show
 enum GameState {
   MENU,
+  WAITING_FOR_START,
   PLAYING_NORMAL,
-  PLAYING_PLACEHOLDER,
+  GAME_OVER,
   HIGHSCORES
 };
 
 GameState currentState = MENU;
 
-// --- MENU VARIABLES ---
+// Menu setup
 int menuSelection = 0; 
 const int NUM_MENU_ITEMS = 3;
-String menuItems[NUM_MENU_ITEMS] = {"Normal Game", "Placeholder", "Highscores"};
+String menuItems[NUM_MENU_ITEMS] = {"Classic Game", "Endless Mode", "Highscores"};
 
-// --- GAMEPLAY VARIABLES ---
+// Active game variables
 int threshold = 2000;   
 int currentScore = 0;
 int curr_pixel = 0;
@@ -42,48 +43,58 @@ int gameSpeed = 150;
 bool jumpedThisRotation = false;
 bool needsReset = false; 
 
-// --- AUDIO VARIABLES ---
+// Mode and win tracking
+bool isEndless = false;
+bool hasWon = false;
+
+// Audio timing
 unsigned long lastBgmTime = 0;
 bool bgmHighNote = false;
 
-// --- HIGHSCORE VARIABLES ---
-const int MAX_SCORES = 5; 
-int highscores[MAX_SCORES] = {0, 0, 0, 0, 0};
+// Highscore tracking
+const int MAX_SCORES = 10; 
+int highscores[MAX_SCORES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int lastAchievedRank = -1; 
+int highscoreScrollIndex = 0; // Tracks where we are looking in the list
 
-// --- BUTTON DEBOUNCING ---
+// Button reading
 bool selectPressed = false;
 bool rightPressed = false;
 bool leftPressed = false;
 
+// Checks the buttons and adds a tiny delay so the menu doesn't scroll too fast
 void updateButtons() {
   selectPressed = (digitalRead(BTN_PLAY_SELECT) == LOW);
   rightPressed = (digitalRead(BTN_RIGHT) == LOW);
   leftPressed = (digitalRead(BTN_LEFT) == LOW);
-  if (selectPressed || rightPressed || leftPressed) delay(150); 
+  if (currentState != PLAYING_NORMAL && (selectPressed || rightPressed || leftPressed)) {
+      delay(150); 
+  }
 }
 
+// Runs once when the board turns on
 void setup() {
   Serial.begin(115200);
 
-  // Init LEDs
+  // Start the LED ring and turn off any stray lights
   ring.begin();
   ring.setBrightness(32);
   ring.clear();
   ring.show();
 
-  // Init OLED
+  // Start the screen and make it right-side up
   lcd.init();
   lcd.flipScreenVertically();
   lcd.setFont(ArialMT_Plain_16);
 
-  // Init Buttons & Buzzer
+  // Setup hardware pins
   pinMode(BTN_PLAY_SELECT, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT_PULLUP);
   pinMode(BTN_LEFT, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 }
 
+// Drops a new score into the leaderboard and shifts the rest down
 void saveScore(int score) {
   lastAchievedRank = -1;
   for (int i = 0; i < MAX_SCORES; i++) {
@@ -98,33 +109,54 @@ void saveScore(int score) {
   }
 }
 
-// Helper function to handle the Game Over sequence
-void triggerGameOver() {
-  // Turn off LED ring
+// Plays sounds and figures out which screen to show when a game ends
+void triggerGameOver(bool playerWon) {
   ring.clear();
   ring.show();
 
-  // Play losing arcade music (Descending tones)
-  tone(BUZZER_PIN, 400, 200);
-  delay(200);
-  tone(BUZZER_PIN, 300, 200);
-  delay(200);
-  tone(BUZZER_PIN, 200, 400);
-  delay(400);
-  noTone(BUZZER_PIN); // Ensure buzzer shuts off
+  if (playerWon) {
+    hasWon = true;
+    
+    // Happy winning tune
+    tone(BUZZER_PIN, 523, 100); delay(100);
+    tone(BUZZER_PIN, 659, 100); delay(100);
+    tone(BUZZER_PIN, 784, 100); delay(100);
+    tone(BUZZER_PIN, 1046, 300); delay(300);
+    noTone(BUZZER_PIN);
+    
+    currentState = GAME_OVER;
+  } else {
+    hasWon = false;
+    
+    // Sad losing tune
+    tone(BUZZER_PIN, 400, 200); delay(200);
+    tone(BUZZER_PIN, 300, 200); delay(200);
+    tone(BUZZER_PIN, 200, 400); delay(400);
+    noTone(BUZZER_PIN); 
 
-  saveScore(currentScore);
-  currentState = HIGHSCORES;
+    // Only save scores and show the leaderboard in Endless mode
+    if (isEndless) {
+      saveScore(currentScore);
+      
+      // Auto-scroll the list so your new score is centered
+      highscoreScrollIndex = lastAchievedRank - 2;
+      if (highscoreScrollIndex < 0) highscoreScrollIndex = 0;
+      if (highscoreScrollIndex > MAX_SCORES - 5) highscoreScrollIndex = MAX_SCORES - 5;
+      
+      currentState = HIGHSCORES;
+    } else {
+      currentState = GAME_OVER;
+    }
+  }
 }
 
+// The main brain of the game that runs continuously
 void loop() {
   updateButtons();
 
   switch (currentState) {
     
-    // ---------------------------------------------------------
-    // MAIN MENU STATE
-    // ---------------------------------------------------------
+    // --- MAIN MENU ---
     case MENU:
       if (rightPressed) {
         menuSelection = (menuSelection + 1) % NUM_MENU_ITEMS;
@@ -135,20 +167,18 @@ void loop() {
       
       if (selectPressed) {
         if (menuSelection == 0) {
-          currentScore = 0;
-          curr_pixel = 0;
-          gameSpeed = 150;
-          jumpedThisRotation = false;
-          needsReset = false; 
-          currentState = PLAYING_NORMAL;
+          isEndless = false;
+          currentState = WAITING_FOR_START;
         } else if (menuSelection == 1) {
-          currentState = PLAYING_PLACEHOLDER;
+          isEndless = true;
+          currentState = WAITING_FOR_START;
         } else if (menuSelection == 2) {
           lastAchievedRank = -1; 
           currentState = HIGHSCORES;
         }
       }
 
+      // Draw the text for the menu
       lcd.clear();
       for (int i = 0; i < NUM_MENU_ITEMS; i++) {
         if (i == menuSelection) {
@@ -163,39 +193,56 @@ void loop() {
       ring.show();
       break;
 
-    // ---------------------------------------------------------
-    // PLAYING NORMAL STATE
-    // ---------------------------------------------------------
-    case PLAYING_NORMAL: { // <--- ADDED CURLY BRACE HERE
+    // --- WAITING FOR SENSOR START ---
+    case WAITING_FOR_START:
       lcd.clear();
-      lcd.drawString(0, 0, "PLAYING!");
+      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
+      lcd.drawString(64, 15, "Press sensor");
+      lcd.drawString(64, 35, "to start!");
+      lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
+
+      // Start the game when the IR sensor reads a finger press
+      if (analogRead(IR_PIN) <= threshold) {
+        currentScore = 0;
+        curr_pixel = 0;
+        gameSpeed = 150;
+        jumpedThisRotation = false;
+        needsReset = false; 
+        currentState = PLAYING_NORMAL;
+      }
+      break;
+
+    // --- ACTUAL GAMEPLAY ---
+    case PLAYING_NORMAL: {
+      lcd.clear();
+      if (isEndless) lcd.drawString(0, 0, "ENDLESS");
+      else lcd.drawString(0, 0, "CLASSIC");
       lcd.drawString(0, 20, "Score: " + String(currentScore));
       lcd.display();
 
-      // --- ANTI-HOLD IR LOGIC & JUMP SOUND ---
+      // YOUR EXACT JUMP LOGIC
       bool isFingerUp = (analogRead(IR_PIN) > threshold);
 
       if (!isFingerUp) {
-        needsReset = false; // Finger removed, ready to jump again
+        needsReset = false; 
       } else if (!needsReset) {
         jumpedThisRotation = true; 
         needsReset = true; 
-        // Play success jump blip
         tone(BUZZER_PIN, 1200, 50); 
       }
 
-      // --- ARCADE BACKGROUND BEAT ---
-      // Plays a simple alternating low tone that speeds up as the game speeds up
+      // YOUR EXACT ARCADE BEAT LOGIC
       if (millis() - lastBgmTime > (gameSpeed * 2.5)) {
         lastBgmTime = millis();
-        if (!needsReset) { // Only play if we aren't currently playing the jump sound
+        if (!needsReset) { 
           if (bgmHighNote) tone(BUZZER_PIN, 180, 40);
           else tone(BUZZER_PIN, 130, 40);
           bgmHighNote = !bgmHighNote;
         }
       }
 
-      // --- LED RING MOVEMENT & GAME LOGIC ---
+      // YOUR EXACT MOVEMENT LOGIC
       if (millis() - lastLedUpdate > gameSpeed) {
         lastLedUpdate = millis();
         
@@ -206,69 +253,113 @@ void loop() {
         ring.setPixelColor(pos, 255);
         ring.show();
 
-        // 1. Halfway Check (Anti-Cheat)
-        if (pos == 8) {
+        // YOUR EXACT ANTI-CHEAT LOGIC
+        if (pos > 4 && pos < 12) {
           if (needsReset) {
-            // Finger was NOT removed before the halfway mark!
-            triggerGameOver();
+            triggerGameOver(false);
           } else {
-            jumpedThisRotation = false; // Safe to jump next time
+            jumpedThisRotation = false; 
           }
         }
 
-        // 2. Start Line Check (Scoring)
+        // YOUR EXACT SCORING LOGIC
         if (pos == 0) { 
           if (jumpedThisRotation) {
             currentScore++;
-            if (currentScore % 5 == 0 && gameSpeed > 30) {
-              gameSpeed -= 15; // Speed up the game
+            if (gameSpeed > 30) {
+              gameSpeed -= 5; 
+            }
+            
+            // Check for the Classic mode win condition
+            if (!isEndless && currentScore >= 25) {
+              triggerGameOver(true);
             }
           } else {
-            // Missed the jump!
-            triggerGameOver();
+            triggerGameOver(false);
           }
         }
       }
       break;
-    } // <--- ADDED CURLY BRACE HERE
+    } 
 
-    // ---------------------------------------------------------
-    // PLAYING PLACEHOLDER STATE
-    // ---------------------------------------------------------
-    case PLAYING_PLACEHOLDER:
+    // --- WIN / LOSE SCREEN ---
+    case GAME_OVER: {
       lcd.clear();
-      lcd.drawString(0, 20, "PLACEHOLDER");
-      lcd.drawString(0, 40, "Press Select...");
-      lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
       
-      if (selectPressed) {
+      if (hasWon) {
+        lcd.drawString(64, 10, "YOU WIN!");
+        
+        // Spin an orange and yellow light pattern on the ring
+        static unsigned long winAnimTimer = 0;
+        static int winAnimOffset = 0;
+        
+        if (millis() - winAnimTimer > 100) {
+          winAnimTimer = millis();
+          winAnimOffset++;
+          
+          for (int i = 0; i < 16; i++) {
+            if ((i + winAnimOffset) % 2 == 0) {
+              ring.setPixelColor(i, 255, 100, 0); // Orange
+            } else {
+              ring.setPixelColor(i, 255, 255, 0); // Yellow
+            }
+          }
+          ring.show();
+        }
+      } else {
+        lcd.drawString(64, 10, "GAME OVER");
+      }
+      
+      lcd.drawString(64, 35, "Score: " + String(currentScore));
+      lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
+
+      // Let the user click any button to go back to the menu
+      if (selectPressed || leftPressed || rightPressed) {
         currentState = MENU;
+        delay(200);
       }
       break;
+    }
 
-    // ---------------------------------------------------------
-    // HIGHSCORES STATE
-    // ---------------------------------------------------------
-    case HIGHSCORES:
+    // --- LEADERBOARD SCREEN ---
+    case HIGHSCORES: {
       lcd.clear();
-      lcd.drawString(0, 0, "- HIGH SCORES -");
+      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
       
-      for (int i = 0; i < MAX_SCORES; i++) {
-        String scoreLine = String(i + 1) + ". " + String(highscores[i]);
+      // Draw 5 scores on the screen based on where you are scrolled
+      for (int i = 0; i < 5; i++) {
+        int scoreIdx = highscoreScrollIndex + i;
+        if (scoreIdx >= MAX_SCORES) break;
+
+        String scoreLine = String(scoreIdx + 1) + ". " + String(highscores[scoreIdx]);
         
-        if (i == lastAchievedRank) {
-          lcd.drawString(0, 15 + (i * 10), ">> " + scoreLine + " <<");
+        // Add arrows pointing to the score you just got
+        if (scoreIdx == lastAchievedRank) {
+          lcd.drawString(64, i * 12, ">> " + scoreLine + " <<");
         } else {
-          lcd.drawString(0, 15 + (i * 10), "   " + scoreLine);
+          lcd.drawString(64, i * 12, scoreLine);
         }
       }
       
       lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
       
-      if (selectPressed || rightPressed || leftPressed) {
+      // Scroll up and down the list using the left and right buttons
+      if (leftPressed && highscoreScrollIndex > 0) {
+        highscoreScrollIndex--;
+      }
+      if (rightPressed && highscoreScrollIndex < MAX_SCORES - 5) {
+        highscoreScrollIndex++;
+      }
+      
+      // Select button goes back to menu
+      if (selectPressed) {
         currentState = MENU;
         delay(200); 
       }
       break;
+    }
   }
 }
