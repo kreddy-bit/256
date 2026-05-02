@@ -24,7 +24,6 @@ enum GameState {
   PLAYING_NORMAL,
   PLAYING_INVISIBLE, 
   PLAYING_RANDOM, 
-  PLAYING_PLACEHOLDER_2, 
   GAME_OVER,
   HIGHSCORES,
   WAITING_RANDOM
@@ -34,13 +33,12 @@ GameState currentState = MENU;
 
 // Menu setup 
 int menuSelection = 0; 
-const int NUM_MENU_ITEMS = 6;
+const int NUM_MENU_ITEMS = 5;
 String menuItems[NUM_MENU_ITEMS] = {
   "Classic Game", 
   "Endless Mode", 
   "Invisible Mode", 
   "Random", 
-  "Placeholder 2", 
   "Highscores"
 };
 
@@ -254,11 +252,9 @@ void loop() {
           isEndless = false; // Invisible uses a 10-point win condition, not endless
           ring.clear(); ring.show();
           currentState = WAITING_FOR_START;
-        } else if (menuSelection == 3) { // Placeholder 1
+        } else if (menuSelection == 3) { // random
           currentState = WAITING_RANDOM;
-        } else if (menuSelection == 4) { // Placeholder 2
-          currentState = PLAYING_PLACEHOLDER_2;
-        } else if (menuSelection == 5) { // Highscores
+        } else if (menuSelection == 4) { // Highscores
           lastAchievedRank = -1; 
           currentState = HIGHSCORES;
         }
@@ -331,13 +327,13 @@ void loop() {
         curr_pixel = 0;
         
         // Invisible mode starts at a fast, fixed speed of 80ms!
-        gameSpeed = (activeMode == 2) ? 80 : 150; 
+        gameSpeed = 150; 
         
         jumpedThisRotation = false;
         needsReset = false; 
         
         // Route to the correct mode based on menu selection
-        if (activeMode == 2) currentState = PLAYING_INVISIBLE;
+        if (activeMode == 3) currentState = PLAYING_RANDOM;
         else currentState = PLAYING_RANDOM;
       }
       break;
@@ -534,23 +530,6 @@ void loop() {
       }
       break;
     } 
-    case PLAYING_PLACEHOLDER_2:
-      lcd.clear();
-      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
-      lcd.drawString(64, 15, "COMING SOON");
-      lcd.drawString(64, 35, "Press to return");
-      lcd.display();
-      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
-      
-      drawDefaultLights();
-
-      if (selectPressed || leftPressed || rightPressed) {
-        ring.clear(); ring.show();
-        currentState = MENU;
-        delay(200);
-      }
-      break;
-
     // --- WIN / LOSE SCREEN ---
     case GAME_OVER: {
       lcd.clear();
