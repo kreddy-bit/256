@@ -24,15 +24,17 @@ enum GameState {
   WAITING_FOR_START,
   PLAYING_NORMAL,
   GAME_OVER,
-  HIGHSCORES
+  HIGHSCORES,
+  INVISIBLE_MODE,
+  WAITING_FOR_INVISIBLE
 };
 
 GameState currentState = MENU;
 
 // Menu setup
 int menuSelection = 0; 
-const int NUM_MENU_ITEMS = 3;
-String menuItems[NUM_MENU_ITEMS] = {"Classic Game", "Endless Mode", "Highscores"};
+const int NUM_MENU_ITEMS = 4;
+String menuItems[NUM_MENU_ITEMS] = {"Classic Game", "Endless Mode", "Highscores", "Invisible Mode"};
 
 // Active game variables
 int threshold = 2000;   
@@ -176,15 +178,18 @@ void loop() {
           lastAchievedRank = -1; 
           currentState = HIGHSCORES;
         }
+        else if(menuSelection == 3){
+          currentState = WAITING_FOR_INVISIBLE;
+        }
       }
 
       // Draw the text for the menu
       lcd.clear();
       for (int i = 0; i < NUM_MENU_ITEMS; i++) {
         if (i == menuSelection) {
-          lcd.drawString(0, 8 + (i * 18), ">> " + menuItems[i]); 
+          lcd.drawString(0, (i * 16), ">> " + menuItems[i]); // Updated spacing
         } else {
-          lcd.drawString(0, 8 + (i * 18), "   " + menuItems[i]);
+          lcd.drawString(0, (i * 16), "   " + menuItems[i]); // Updated spacing
         }
       }
       lcd.display();
@@ -210,6 +215,25 @@ void loop() {
         jumpedThisRotation = false;
         needsReset = false; 
         currentState = PLAYING_NORMAL;
+      }
+      break;
+
+    case WAITING_FOR_INVISIBLE:
+      lcd.clear();
+      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
+      lcd.drawString(64, 15, "Press sensor");
+      lcd.drawString(64, 35, "to start!");
+      lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
+
+      // Start the game when the IR sensor reads a finger press
+      if (analogRead(IR_PIN) <= threshold) {
+        currentScore = 0;
+        curr_pixel = 0;
+        gameSpeed = 150;
+        jumpedThisRotation = false;
+        needsReset = false; 
+        currentState = INVISIBLE_MODE;
       }
       break;
 
@@ -243,15 +267,19 @@ void loop() {
       }
 
       // YOUR EXACT MOVEMENT LOGIC
-      if (millis() - lastLedUpdate > gameSpeed) {
-        lastLedUpdate = millis();
-        
-        ring.setPixelColor(curr_pixel % 16, 0);
-        curr_pixel++;
-        int pos = curr_pixel % 16;
-        
-        ring.setPixelColor(pos, 255);
-        ring.show();
+        if (millis() - lastLedUpdate > gameSpeed) {
+          lastLedUpdate = millis();
+          
+          ring.setPixelColor(curr_pixel % 16, 0); // Turn off the old pixel
+          curr_pixel++;
+          int pos = curr_pixel % 16;
+          
+          // Only turn ON the new pixel if score is under 3
+          if(currentScore < 3){
+            ring.setPixelColor(pos, 255);
+          }
+          
+          ring.show();
 
         // YOUR EXACT ANTI-CHEAT LOGIC
         if (pos > 4 && pos < 12) {
@@ -281,7 +309,72 @@ void loop() {
       }
       break;
     } 
+    case INVISIBLE_MODE: {
+      gameSpeed = 80;
+      lcd.clear();
+      if (isEndless) lcd.drawString(0, 0, "ENDLESS");
+      else lcd.drawString(0, 0, "INVISIBLE");
+      lcd.drawString(0, 20, "Score: " + String(currentScore));
+      lcd.display();
 
+      // YOUR EXACT JUMP LOGIC
+      bool isFingerUp = (analogRead(IR_PIN) > threshold);
+
+      if (!isFingerUp) {
+        needsReset = false; 
+      } else if (!needsReset) {
+        jumpedThisRotation = true; 
+        needsReset = true; 
+        tone(BUZZER_PIN, 1200, 50); 
+      }
+
+      // YOUR EXACT ARCADE BEAT LOGIC
+      if (millis() - lastBgmTime > (gameSpeed * 2.5)) {
+        lastBgmTime = millis();
+        if (!needsReset) { 
+          if (bgmHighNote) tone(BUZZER_PIN, 180, 40);
+          else tone(BUZZER_PIN, 130, 40);
+          bgmHighNote = !bgmHighNote;
+        }
+      }
+
+      // YOUR EXACT MOVEMENT LOGIC
+      if (millis() - lastLedUpdate > gameSpeed) {
+        lastLedUpdate = millis();
+        
+        ring.setPixelColor(curr_pixel % 16, 0);
+        curr_pixel++;
+        int pos = curr_pixel % 16;
+        if(currentScore < 3){
+          ring.setPixelColor(pos, 255);
+          ring.show();
+        }
+
+        // YOUR EXACT ANTI-CHEAT LOGIC
+        if (pos > 4 && pos < 12) {
+          if (needsReset) {
+            triggerGameOver(false);
+          } else {
+            jumpedThisRotation = false; 
+          }
+        }
+
+        // YOUR EXACT SCORING LOGIC
+        if (pos == 0) { 
+          if (jumpedThisRotation) {
+            currentScore++;
+            
+            // Check for the Classic mode win condition
+            if (!isEndless && currentScore >= 10) {
+              triggerGameOver(true);
+            }
+          } else {
+            triggerGameOver(false);
+          }
+        }
+      }
+      break;
+    } 
     // --- WIN / LOSE SCREEN ---
     case GAME_OVER: {
       lcd.clear();
