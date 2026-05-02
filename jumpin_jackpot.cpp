@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <random>
 #include <Wire.h>
 #include <SSD1306Wire.h>
 #include <Adafruit_NeoPixel.h>
@@ -22,10 +23,11 @@ enum GameState {
   WAITING_FOR_START,
   PLAYING_NORMAL,
   PLAYING_INVISIBLE, 
-  PLAYING_PLACEHOLDER_1, 
+  PLAYING_RANDOM, 
   PLAYING_PLACEHOLDER_2, 
   GAME_OVER,
-  HIGHSCORES
+  HIGHSCORES,
+  WAITING_RANDOM
 };
 
 GameState currentState = MENU;
@@ -37,7 +39,7 @@ String menuItems[NUM_MENU_ITEMS] = {
   "Classic Game", 
   "Endless Mode", 
   "Invisible Mode", 
-  "Placeholder 1", 
+  "Random", 
   "Placeholder 2", 
   "Highscores"
 };
@@ -253,7 +255,7 @@ void loop() {
           ring.clear(); ring.show();
           currentState = WAITING_FOR_START;
         } else if (menuSelection == 3) { // Placeholder 1
-          currentState = PLAYING_PLACEHOLDER_1;
+          currentState = WAITING_RANDOM;
         } else if (menuSelection == 4) { // Placeholder 2
           currentState = PLAYING_PLACEHOLDER_2;
         } else if (menuSelection == 5) { // Highscores
@@ -312,7 +314,33 @@ void loop() {
         else currentState = PLAYING_NORMAL;
       }
       break;
+    case WAITING_RANDOM:
+      lcd.clear();
+      lcd.setTextAlignment(TEXT_ALIGN_CENTER);
+      lcd.drawString(64, 15, "Press sensor");
+      lcd.drawString(64, 35, "to start!");
+      lcd.display();
+      lcd.setTextAlignment(TEXT_ALIGN_LEFT);
 
+      ring.clear();
+      ring.setPixelColor(0, 255, 255, 0);
+      ring.show();
+
+      if (analogRead(IR_PIN) <= threshold) {
+        currentScore = 0;
+        curr_pixel = 0;
+        
+        // Invisible mode starts at a fast, fixed speed of 80ms!
+        gameSpeed = (activeMode == 2) ? 80 : 150; 
+        
+        jumpedThisRotation = false;
+        needsReset = false; 
+        
+        // Route to the correct mode based on menu selection
+        if (activeMode == 2) currentState = PLAYING_INVISIBLE;
+        else currentState = PLAYING_RANDOM;
+      }
+      break;
     // --- NORMAL / ENDLESS GAMEPLAY ---
     case PLAYING_NORMAL: {
       lcd.clear();
@@ -446,7 +474,66 @@ void loop() {
     }
 
     // --- PLACEHOLDER STATES ---
-    case PLAYING_PLACEHOLDER_1:
+    case PLAYING_RANDOM: {
+      lcd.clear();
+      if (isEndless) lcd.drawString(0, 0, "ENDLESS");   
+      else lcd.drawString(0, 0, "RANDOM");
+      lcd.drawString(0, 20, "Score: " + String(currentScore));
+      lcd.display();
+
+      bool isFingerUp = (analogRead(IR_PIN) > threshold);
+
+      if (!isFingerUp) {
+        needsReset = false; 
+      } else if (!needsReset) {
+        jumpedThisRotation = true; 
+        needsReset = true; 
+        tone(BUZZER_PIN, 1200, 50); 
+      }
+
+      if (millis() - lastBgmTime > (gameSpeed * 2.5)) {
+        lastBgmTime = millis();
+        if (!needsReset) { 
+          if (bgmHighNote) tone(BUZZER_PIN, 180, 40);
+          else tone(BUZZER_PIN, 130, 40);
+          bgmHighNote = !bgmHighNote;
+        }
+      }
+
+      if (millis() - lastLedUpdate > gameSpeed) {
+        lastLedUpdate = millis();
+        
+        ring.setPixelColor(curr_pixel % 16, 0); 
+        curr_pixel++;
+        int pos = curr_pixel % 16;
+        
+        ring.setPixelColor(0, 255, 255, 0); 
+        ring.setPixelColor(pos, 255); 
+        ring.show();
+
+        if (pos > 4 && pos < 12) {
+          if (needsReset) {
+            triggerGameOver(false);
+          } else {
+            jumpedThisRotation = false; 
+          }
+        }
+
+        if (pos == 0) { 
+          if (jumpedThisRotation) {
+            currentScore++;
+            gameSpeed = random(30,131);
+            
+            if (!isEndless && currentScore >= 15) {
+              triggerGameOver(true);
+            }
+          } else {
+            triggerGameOver(false);
+          }
+        }
+      }
+      break;
+    } 
     case PLAYING_PLACEHOLDER_2:
       lcd.clear();
       lcd.setTextAlignment(TEXT_ALIGN_CENTER);
