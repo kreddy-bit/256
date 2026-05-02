@@ -69,11 +69,14 @@ int lastAchievedRank = -1;
 int highscoreScrollIndex = 0; 
 
 // Pool of random retro gamer tags
-const int NUM_RANDOM_NAMES = 15;
+const int NUM_RANDOM_NAMES = 26;
 String randomNames[NUM_RANDOM_NAMES] = {
-  "Viper", "Ghost", "Ninja", "Nova", "Pulse", 
-  "Echo", "Hawk", "Wolf", "Neon", "Jinx", 
-  "Zane", "Axel", "Kael", "Nyx", "Rex"
+  "DH Kim", "Blazek", "Reddy", "Hart", "J. Tatum",
+  "Invincble", "Omni-Man", "Atom Eve", "Robot", 
+  "Thragg", "Conquest", "B. Beast", "Allen",
+  "RexSplode", "DupliKate", "M. Girl", "Immortal",
+  "Mauler", "Angstrom", "Cecil", "Titan", "S. Racer",
+  "Kradd", "Argall", "Lucan", "Homelanda"
 };
 
 // Button state variables
